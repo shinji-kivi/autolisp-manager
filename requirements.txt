@@ -1,0 +1,6 @@
+customtkinter
+windnd
+tkinterdnd2
+pywin32
+pyinstaller
+pillow

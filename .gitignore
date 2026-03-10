@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+*.spec
+*.log
+
+# PyInstaller
+*.manifest
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Project-specific
+# ビルド成果物（EXEはGitHub Releasesで配布）
+dist/
+build/
+
+# ドキュメント（内部用）
+デバッグチェックリスト.md
+完了報告書.md
+実施計画書.md
+仕様書.md
