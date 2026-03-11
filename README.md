@@ -99,7 +99,9 @@ build.bat
 
 ## ライセンス
 
-MIT License — 詳細は [LICENSE](LICENSE) を参照してください。
+[MIT License](LICENSE)
+
+自由に使用・配布・改変できます。著作権表示（`Copyright (c) 2026 studio kivi`）を残してください。
 
 ---
 
