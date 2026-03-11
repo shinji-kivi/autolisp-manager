@@ -432,10 +432,14 @@ class App(ctk.CTk, _DnDWrapper):
             )
 
     def _find_autocad_exe(self) -> str | None:
-        """AutoCAD の実行ファイルパスをレジストリ → 固定パスの順で探す。"""
+        """AutoCAD の実行ファイルパスをレジストリ → 固定パスの順で探す。
+        複数バージョンがインストールされている場合は最新バージョンを優先する。
+        """
         import winreg
 
-        # 1) レジストリから検索
+        # 1) レジストリから全バージョンを収集してソート
+        # サブキー名は "R24.0", "R24.1", "R25.0" などのリリース番号形式
+        candidates: list[tuple[tuple[int, ...], str]] = []
         try:
             with winreg.OpenKey(
                 winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Autodesk\AutoCAD"
@@ -447,13 +451,22 @@ class App(ctk.CTk, _DnDWrapper):
                             install_dir, _ = winreg.QueryValueEx(skey, "")
                             candidate = os.path.join(install_dir, "acad.exe")
                             if os.path.isfile(candidate):
-                                return candidate
+                                # "R24.1" → (24, 1) としてソート可能なタプルに変換
+                                ver_str = sub.lstrip("Rr")
+                                ver_tuple = tuple(
+                                    int(x) for x in ver_str.split(".") if x.isdigit()
+                                )
+                                candidates.append((ver_tuple, candidate))
                     except OSError:
                         continue
         except OSError:
             pass
 
-        # 2) 固定パスにフォールバック
+        if candidates:
+            candidates.sort(key=lambda x: x[0], reverse=True)
+            return candidates[0][1]
+
+        # 2) 固定パスにフォールバック（新しい年から順に探す）
         for year in range(2026, 2019, -1):
             for base in [
                 r"C:\Program Files\Autodesk",
