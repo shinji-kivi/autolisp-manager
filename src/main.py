@@ -58,8 +58,39 @@ def _ensure_single_instance() -> bool:
     return True
 
 
+def _run_uninstall() -> None:
+    """アンインストール時のクリーンアップ処理。
+
+    レジストリの TRUSTEDPATHS / SupportPath からリポジトリパスを削除し、
+    acaddoc.lsp の管理範囲を除去する。GUI は表示しない。
+    """
+    import os as _os
+    from acad_sync import AcadSync
+    from lisp_manager import LispManager
+
+    config = AppConfig.load()
+    repo = config.repo_path
+
+    # レジストリから削除
+    acad = AcadSync()
+    acad.remove_paths_from_registry(repo)
+
+    # acaddoc.lsp の管理範囲を除去
+    try:
+        manager = LispManager(repo)
+        manager.cleanup()
+    except Exception:
+        pass
+
+    logging.getLogger(__name__).info("アンインストールクリーンアップ完了: %s", repo)
+    _os._exit(0)
+
+
 if __name__ == "__main__":
     _setup_logging()
+
+    if "--uninstall" in sys.argv:
+        _run_uninstall()
 
     if not _ensure_single_instance():
         # os._exit() でプロセスを即終了する。

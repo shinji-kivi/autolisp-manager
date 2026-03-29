@@ -70,8 +70,11 @@ Filename: "{app}\{#AppExeName}"; Description: "{#AppName} を起動する"; \
 ; アンインストール前にプロセスを終了（ファイルロック防止）
 Filename: "taskkill.exe"; Parameters: "/f /im ""{#AppExeName}"""; \
   RunOnceId: "KillApp"; Flags: runhidden skipifdoesntexist
+; レジストリの TRUSTEDPATHS / SupportPath 削除 + acaddoc.lsp クリーンアップ
+Filename: "{app}\{#AppExeName}"; Parameters: "--uninstall"; \
+  RunOnceId: "Cleanup"; Flags: runhidden waituntilterminated skipifdoesntexist
 
-[Code]
-// アンインストール時: acaddoc.lsp のランチャー行が残るが、EXE が消えるだけなので
-// AutoCAD での lisp_manager コマンドは静かに失敗する（エラーダイアログなし）。
-// 必要であれば管理ツールの「設定を元に戻す」を先に実行してください。
+; アンインストール時の処理順序:
+;   1. taskkill で実行中の EXE を終了
+;   2. EXE --uninstall でレジストリ削除 + acaddoc.lsp クリーンアップ
+;   3. Inno Setup が EXE 本体を削除
