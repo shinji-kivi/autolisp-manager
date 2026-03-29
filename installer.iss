@@ -43,7 +43,6 @@ SolidCompression=yes
 
 ; ウィンドウ設定
 WizardStyle=modern
-WizardResizable=no
 
 [Languages]
 Name: "japanese"; MessagesFile: "compiler:Languages\Japanese.isl"
@@ -70,7 +69,7 @@ Filename: "{app}\{#AppExeName}"; Description: "{#AppName} を起動する"; \
 [UninstallRun]
 ; アンインストール前にプロセスを終了（ファイルロック防止）
 Filename: "taskkill.exe"; Parameters: "/f /im ""{#AppExeName}"""; \
-  Flags: runhidden skipifdoesntexist
+  RunOnceId: "KillApp"; Flags: runhidden skipifdoesntexist
 
 [Code]
 // アンインストール時: acaddoc.lsp のランチャー行が残るが、EXE が消えるだけなので
