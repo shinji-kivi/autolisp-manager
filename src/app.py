@@ -161,10 +161,10 @@ class App(ctk.CTk, _DnDWrapper):
 
         ctk.CTkButton(
             sidebar,
-            text="設定を元に戻す",
+            text="アンインストール",
             fg_color="#d35b5b",
             hover_color="#8e3e3e",
-            command=self._on_cleanup,
+            command=self._on_uninstall,
             height=35,
         ).pack(side="bottom", pady=20, padx=20, fill="x")
 
@@ -571,29 +571,34 @@ class App(ctk.CTk, _DnDWrapper):
             logger.warning(acad_result.detail or acad_result.message)
         self._refresh_list()
 
-    def _on_cleanup(self) -> None:
+    def _on_uninstall(self) -> None:
+        """システムのアンインストーラーを起動する。
+
+        インストーラー経由でインストールされていない場合はエラーを表示する。
+        """
+        import subprocess
+        import winreg
+
         if not messagebox.askyesno(
-            "確認",
-            "本ツールが行った設定（acaddoc.lsp、検索パス等）を削除し、"
-            "導入前の状態に戻しますか？\n"
-            "\u26a0 リポジトリ内の LISP ファイルもすべて削除されます。",
+            "アンインストール",
+            "AutoLISP管理ツールをアンインストールしますか？\n\n"
+            "登録済み LISP ファイルと AutoCAD の設定もすべて削除されます。",
         ):
             return
 
-        lisp_result = self._manager.cleanup()
-        acad_result = self._acad.remove_paths(
-            str(self._manager.get_repo_dir())
-        )
-
-        if lisp_result.success:
-            extra = ""
-            if not acad_result.success:
-                extra = f"\n\n\u26a0 {acad_result.message}"
-            messagebox.showinfo("完了", lisp_result.message + extra)
-        else:
-            messagebox.showerror("エラー", lisp_result.message)
-
-        self._refresh_list()
+        app_id = "{9F3A2B1C-4D5E-6F7A-8B9C-0D1E2F3A4B5C}"
+        reg_path = f"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{app_id}"
+        try:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, reg_path) as key:
+                uninstall_str, _ = winreg.QueryValueEx(key, "UninstallString")
+            subprocess.Popen(uninstall_str)
+            self.destroy()
+        except FileNotFoundError:
+            messagebox.showerror(
+                "エラー",
+                "アンインストーラーが見つかりません。\n"
+                "「設定」→「アプリ」からアンインストールしてください。",
+            )
 
     def _on_close(self) -> None:
         """ウィンドウを閉じる前にジオメトリを設定に保存する。"""
