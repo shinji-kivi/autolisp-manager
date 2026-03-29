@@ -496,8 +496,11 @@ class App(ctk.CTk, _DnDWrapper):
             self._manager.update_launcher(sys.executable)
         else:
             # Python スクリプトとして起動中
+            # pythonw.exe があればコンソールウィンドウを非表示にする
+            pythonw = Path(sys.executable).with_name("pythonw.exe")
+            launcher_exe = str(pythonw) if pythonw.exists() else sys.executable
             self._manager.update_launcher(
-                sys.executable,
+                launcher_exe,
                 str(Path(__file__).parent / "main.py"),
             )
 
