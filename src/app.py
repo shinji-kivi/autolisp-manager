@@ -73,6 +73,8 @@ class App(ctk.CTk, _DnDWrapper):
         self.after(200, self._ensure_trusted_path_registry)
         # AutoCAD 起動を監視してパスを自動登録（起動前でも後でも対応）
         self.after(500, self._poll_autocad)
+        # AutoCAD が未起動なら起動を促す（1.5 秒後にウィンドウが安定してから）
+        self.after(1500, self._prompt_launch_autocad)
 
     # ------------------------------------------------------------------
     # DnD 初期化（tkinterdnd2）
@@ -441,6 +443,18 @@ class App(ctk.CTk, _DnDWrapper):
             os.startfile(repo)
         except OSError as e:
             messagebox.showerror("エラー", f"フォルダを開けませんでした。\n{e}")
+
+    def _prompt_launch_autocad(self) -> None:
+        """起動時に AutoCAD が未起動なら起動を促すダイアログを表示する（1回のみ）。"""
+        if self._acad.is_available():
+            return  # 既に起動中なら不要
+        if self._find_autocad_exe() is None:
+            return  # AutoCAD が見つからない環境では表示しない
+        if messagebox.askyesno(
+            "AutoCAD が起動していません",
+            "AutoCAD が起動していません。\n今すぐ起動しますか？",
+        ):
+            self._on_launch_autocad()
 
     def _on_launch_autocad(self) -> None:
         """AutoCAD を起動する。レジストリ → 固定パスの順で探索する。"""
