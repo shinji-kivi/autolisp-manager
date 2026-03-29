@@ -42,7 +42,9 @@ except ImportError:
 class App(ctk.CTk, _DnDWrapper):
     """AutoLISP 管理ツール メインウィンドウ。"""
 
-    _ACAD_POLL_MS = 10_000  # AutoCAD 起動検知のポーリング間隔（ミリ秒）
+    _ACAD_POLL_MS = 10_000       # AutoCAD 起動検知のポーリング間隔（ミリ秒）
+    _ACAD_EXIT_REWRITE_MS = 2_000   # AutoCAD 終了後にレジストリを再書き込みするまでの待機（ミリ秒）
+    _ACAD_LAUNCH_WAIT_MS = 15_000   # AutoCAD 起動コマンド後、COM 接続を試みるまでの待機（ミリ秒）
 
     def __init__(self, config: AppConfig) -> None:
         super().__init__()
@@ -299,6 +301,11 @@ class App(ctk.CTk, _DnDWrapper):
             self._register_files(lsp_files)
         except Exception:
             logger.error("D&D コールバックでエラー", exc_info=True)
+            messagebox.showerror(
+                "エラー",
+                "ドラッグ＆ドロップの処理中にエラーが発生しました。\n"
+                "「＋ LISPを追加」ボタンをお試しください。",
+            )
 
     def _on_delete_lisp(self, path: str) -> None:
         if not messagebox.askyesno(
@@ -337,13 +344,16 @@ class App(ctk.CTk, _DnDWrapper):
             if result.success:
                 logger.info("AutoCAD を検出 - パスを自動登録しました。")
                 self._set_status("AutoCAD を検出 - パスを自動登録しました。")
+                # acaddoc.lsp をフルパスで即時ロード（ランチャーコマンド + 有効な LISP を一括反映）
+                acaddoc_path = str(self._manager.get_acaddoc_path()).replace("\\", "/")
+                self._acad.load_lisp(acaddoc_path)
             else:
                 logger.warning("パス自動登録に失敗しました: %s", result.message)
         elif not now_available and self._acad_was_available:
             # AutoCAD 終了検知 → 終了時に TRUSTEDPATHS が空で保存される恐れがあるため
             # 2 秒後にレジストリへ再書き込みして自己修復する
             logger.info("AutoCAD の終了を検出 - 2秒後にレジストリを再設定します。")
-            self.after(2000, self._ensure_trusted_path_registry)
+            self.after(self._ACAD_EXIT_REWRITE_MS, self._ensure_trusted_path_registry)
         self._acad_was_available = now_available
         self.after(self._ACAD_POLL_MS, self._poll_autocad)
 
@@ -378,14 +388,14 @@ class App(ctk.CTk, _DnDWrapper):
         if not prev:
             return
         logger.info("残留パスをレジストリから削除します: %s", prev)
-        self._acad._remove_path_from_registry(prev)
+        self._acad.remove_paths_from_registry(prev)
         self._config.prev_repo_path = ""
         self._config.save()
 
     def _ensure_trusted_path_registry(self) -> None:
         """AutoCAD の起動状態に関わらず SupportPath/TRUSTEDPATHS をレジストリに永続登録する。"""
         repo = str(self._manager.get_repo_dir())
-        updated = self._acad._add_trusted_path_registry(repo, self._acad._normalize_path(repo))
+        updated = self._acad.ensure_trusted_path_registry(repo)
         if updated:
             logger.info("SupportPath/TRUSTEDPATHS をレジストリに永続登録しました: %s", repo)
             self._set_status("信頼済みパスをレジストリに書き込みました。AutoCAD 再起動で有効になります。")
@@ -425,7 +435,7 @@ class App(ctk.CTk, _DnDWrapper):
             subprocess.Popen(acad_exe)
             logger.info("AutoCAD を起動しました: %s", acad_exe)
             # AutoCAD の起動完了後にパスを自動登録（15秒後に試行）
-            self.after(15000, self._auto_add_paths)
+            self.after(self._ACAD_LAUNCH_WAIT_MS, self._auto_add_paths)
         except OSError as e:
             messagebox.showerror(
                 "エラー", f"AutoCAD を起動できませんでした。\n{e}"
@@ -467,7 +477,8 @@ class App(ctk.CTk, _DnDWrapper):
             return candidates[0][1]
 
         # 2) 固定パスにフォールバック（新しい年から順に探す）
-        for year in range(2026, 2019, -1):
+        import datetime
+        for year in range(datetime.date.today().year + 1, 2019, -1):
             for base in [
                 r"C:\Program Files\Autodesk",
                 r"C:\Program Files (x86)\Autodesk",
@@ -506,7 +517,7 @@ class App(ctk.CTk, _DnDWrapper):
 
         # 古いパスをレジストリ（および起動中の AutoCAD）から削除
         if old_repo_path != new_repo_path:
-            self._acad._remove_path_from_registry(old_repo_path)
+            self._acad.remove_paths_from_registry(old_repo_path)
             self._acad.remove_paths(old_repo_path)
             self._config.prev_repo_path = ""
             self._config.save()

@@ -90,8 +90,9 @@ class AcadSync:
             norm = _normalize(repo_path)
 
             # SupportPath
+            current_support = pref.SupportPath or ""
             new_support = ";".join(
-                p for p in pref.SupportPath.split(";") if _normalize(p) != norm
+                p for p in current_support.split(";") if _normalize(p) != norm
             )
             pref.SupportPath = new_support
 
@@ -123,7 +124,7 @@ class AcadSync:
                 logger.debug("アクティブドキュメントなし: LISP の即時ロードをスキップ")
                 return
             # SendCommand はコマンドラインへの入力と同等
-            doc.SendCommand(f'(load "{stem}") \n')
+            doc.SendCommand(f'(progn (load "{stem}" nil) (princ))\n')
             logger.info("AutoCAD に LISP を即時ロードしました: %s", stem)
         except Exception as e:
             logger.warning("LISP の即時ロードに失敗しました (%s): %s", stem, e)
@@ -220,7 +221,7 @@ class AcadSync:
                 logger.debug("アクティブドキュメントなし: パレット再読み込みをスキップ")
                 return
             # パレットを閉じて再度開くことで .atc の変更を即時反映する
-            # （_ToolPalettesClose / _ToolPalettes は AutoCAD 2026 で動作確認済み）
+            # （_ToolPalettesClose / _ToolPalettes は AutoCAD 2027 で動作確認済み）
             doc.SendCommand("_ToolPalettesClose\n")
             doc.SendCommand("_ToolPalettes\n")
             logger.info("ツールパレットを再読み込みしました")
@@ -280,6 +281,22 @@ class AcadSync:
             del acad
 
     # ------------------------------------------------------------------
+    # レジストリ操作（AutoCAD 未起動時用）
+    # ------------------------------------------------------------------
+
+    def remove_paths_from_registry(self, repo_path: str) -> None:
+        """レジストリから指定パスを TRUSTEDPATHS / SupportPath から削除する（AutoCAD 未起動時用）。"""
+        self._remove_path_from_registry(repo_path)
+
+    def ensure_trusted_path_registry(self, repo_path: str) -> bool:
+        """レジストリへ TRUSTEDPATHS / SupportPath を直接書き込む（AutoCAD 未起動時用）。
+
+        Returns True if at least one profile was updated.
+        """
+        norm = _normalize(repo_path)
+        return self._add_trusted_path_registry(repo_path, norm)
+
+    # ------------------------------------------------------------------
     # プライベートメソッド
     # ------------------------------------------------------------------
 
@@ -331,7 +348,23 @@ class AcadSync:
         except Exception as e:
             logger.warning("Preferences.Files.TrustedPaths 失敗: %s", e)
 
-        # Method 3: レジストリへの直接書き込み（COM が使えない場合）
+        # Method 3: SendCommand で LISP 経由（AutoCAD 2027+ で COM API が非対応の場合）
+        try:
+            doc = acad.ActiveDocument
+            if doc is not None:
+                lisp_path = repo_path.replace("\\", "\\\\")
+                doc.SendCommand(
+                    f'(progn (if (not (vl-string-search (strcase "{lisp_path}" t) (strcase (getvar "TRUSTEDPATHS") t)))'
+                    f' (setvar "TRUSTEDPATHS" (strcat "{lisp_path};" (getvar "TRUSTEDPATHS")))) (princ))\n'
+                )
+                logger.info(
+                    "TRUSTEDPATHS を更新しました (SendCommand): %s", repo_path
+                )
+                return
+        except Exception as e:
+            logger.warning("SendCommand による TRUSTEDPATHS 更新失敗: %s", e)
+
+        # Method 4: レジストリへの直接書き込み（COM が使えない場合）
         if self._add_trusted_path_registry(repo_path, norm):
             logger.info(
                 "TRUSTEDPATHS をレジストリに書き込みました（AutoCAD 再起動後に有効）: %s",
@@ -536,17 +569,23 @@ class AcadSync:
         """起動中の AutoCAD インスタンスを取得する。
 
         GetActiveObject で接続を試み、失敗した場合は None を返す。
+        汎用 ProgID で接続できない場合はバージョン付き ProgID を順に試す。
         """
         try:
             import win32com.client
-
-            acad = win32com.client.GetActiveObject("AutoCAD.Application")
-            # 接続確認: Visible プロパティにアクセスできれば正常
-            _ = acad.Visible
-            return acad
         except ImportError:
             logger.warning("pywin32 がインストールされていません")
             return None
-        except Exception:
-            # COMエラー（起動していない等）は正常ケースとして None を返す
-            return None
+
+        # 汎用 → バージョン付きの順に試行（新しいバージョンを優先）
+        prog_ids = ["AutoCAD.Application"]
+        prog_ids.extend(f"AutoCAD.Application.{v}" for v in range(26, 23, -1))
+
+        for prog_id in prog_ids:
+            try:
+                acad = win32com.client.GetActiveObject(prog_id)
+                _ = acad.Visible
+                return acad
+            except Exception:
+                continue
+        return None

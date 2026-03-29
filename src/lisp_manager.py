@@ -61,6 +61,10 @@ class LispManager:
         """リポジトリフォルダのパスを返す。"""
         return self._repo_dir
 
+    def get_acaddoc_path(self) -> Path:
+        """acaddoc.lsp のパスを返す。"""
+        return self._acaddoc_path
+
     def register(self, src_path: str) -> OperationResult:
         """LISP ファイルをリポジトリにコピーし、acaddoc.lsp に登録する。
 
@@ -294,13 +298,16 @@ class LispManager:
 
     # acaddoc.lsp に埋め込む TRUSTEDPATHS 自己登録コード
     # 既にパスが含まれている場合は追加しない（重複防止）。
+    # let* は AutoCAD の初期ロード段階で使えない場合があるため setq を使用する。
     # vl-filename-directory は末尾に "\" が付くため、検索前にストリップして比較する。
     _TRUSTED_SELF_REGISTER: str = (
-        r'(let* ((p (vl-filename-directory (findfile "acaddoc.lsp")))'
-        r' (tp (getvar "TRUSTEDPATHS"))'
-        r' (ps (if (= (substr p (strlen p)) "\\") (substr p 1 (1- (strlen p))) p)))'
-        r' (if (not (vl-string-search (strcase ps t) (strcase tp t)))'
-        r'  (setvar "TRUSTEDPATHS" (strcat p ";" tp))))'
+        r'(progn'
+        r' (setq _lm_p (vl-filename-directory (findfile "acaddoc.lsp")))'
+        r' (setq _lm_tp (getvar "TRUSTEDPATHS"))'
+        r' (setq _lm_ps (if (= (substr _lm_p (strlen _lm_p)) "\\") (substr _lm_p 1 (1- (strlen _lm_p))) _lm_p))'
+        r' (if (not (vl-string-search (strcase _lm_ps T) (strcase _lm_tp T)))'
+        r'  (setvar "TRUSTEDPATHS" (strcat _lm_p ";" _lm_tp)))'
+        r' (setq _lm_p nil _lm_tp nil _lm_ps nil) (princ))'
     )
 
     def _write_acaddoc(self, disabled: set[str]) -> OperationResult:
@@ -312,9 +319,9 @@ class LispManager:
         """
         lines: list[str] = [self.START_MARKER, self._TRUSTED_SELF_REGISTER]
         for lsp in self._list_lsp_files():
-            load_line = f'(load "{lsp.stem}")'
+            load_line = f'(load "{lsp.stem}" nil)'
             if lsp.stem in disabled:
-                load_line = f";; {load_line}"
+                load_line = f';; (load "{lsp.stem}")'
             lines.append(load_line)
         if self._launcher_lisp:
             lines.append(self._launcher_lisp)
