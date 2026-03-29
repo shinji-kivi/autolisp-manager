@@ -45,6 +45,8 @@ class App(ctk.CTk, _DnDWrapper):
     _ACAD_POLL_MS = 10_000       # AutoCAD 起動検知のポーリング間隔（ミリ秒）
     _ACAD_EXIT_REWRITE_MS = 2_000   # AutoCAD 終了後にレジストリを再書き込みするまでの待機（ミリ秒）
     _ACAD_LAUNCH_WAIT_MS = 15_000   # AutoCAD 起動コマンド後、COM 接続を試みるまでの待機（ミリ秒）
+    _ACAD_LOAD_RETRY_MS = 5_000     # 図面未オープン時の acaddoc.lsp ロードリトライ間隔（ミリ秒）
+    _ACAD_LOAD_RETRY_MAX = 24       # リトライ上限（5秒×24回 = 2分間）
 
     def __init__(self, config: AppConfig) -> None:
         super().__init__()
@@ -344,11 +346,13 @@ class App(ctk.CTk, _DnDWrapper):
             if result.success:
                 logger.info("AutoCAD を検出 - パスを自動登録しました。")
                 self._set_status("AutoCAD を検出 - パスを自動登録しました。")
-                # acaddoc.lsp をフルパスで即時ロード（ランチャーコマンド + 有効な LISP を一括反映）
-                acaddoc_path = str(self._manager.get_acaddoc_path()).replace("\\", "/")
-                self._acad.load_lisp(acaddoc_path)
             else:
                 logger.warning("パス自動登録に失敗しました: %s", result.message)
+            # acaddoc.lsp をフルパスで即時ロード
+            # 起動直後は図面未オープンでスキップされる場合があるためリトライする
+            acaddoc_path = str(self._manager.get_acaddoc_path()).replace("\\", "/")
+            if not self._acad.load_lisp(acaddoc_path):
+                self._schedule_acaddoc_retry(acaddoc_path, self._ACAD_LOAD_RETRY_MAX)
         elif not now_available and self._acad_was_available:
             # AutoCAD 終了検知 → 終了時に TRUSTEDPATHS が空で保存される恐れがあるため
             # 2 秒後にレジストリへ再書き込みして自己修復する
@@ -356,6 +360,25 @@ class App(ctk.CTk, _DnDWrapper):
             self.after(self._ACAD_EXIT_REWRITE_MS, self._ensure_trusted_path_registry)
         self._acad_was_available = now_available
         self.after(self._ACAD_POLL_MS, self._poll_autocad)
+
+    def _schedule_acaddoc_retry(self, acaddoc_path: str, remaining: int) -> None:
+        """図面が開かれるまで acaddoc.lsp のロードをリトライする。
+
+        AutoCAD 起動直後は ActiveDocument が None のためロードがスキップされる。
+        5 秒ごとにリトライし、成功するか上限に達したら終了する。
+        """
+        if remaining <= 0:
+            logger.debug("acaddoc.lsp リトライ上限に達しました")
+            return
+        if not self._acad.is_available():
+            return  # AutoCAD が終了していれば中止
+        if self._acad.load_lisp(acaddoc_path):
+            logger.info("acaddoc.lsp をリトライでロードしました（残り %d 回）", remaining)
+            return
+        self.after(
+            self._ACAD_LOAD_RETRY_MS,
+            lambda: self._schedule_acaddoc_retry(acaddoc_path, remaining - 1),
+        )
 
     def _auto_sync_palette(self) -> None:
         """LISP 登録・AutoCAD 検出時にパレットを自動生成・配置する（メッセージなし）。

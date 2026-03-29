@@ -110,24 +110,27 @@ class AcadSync:
         finally:
             del acad
 
-    def load_lisp(self, stem: str) -> None:
+    def load_lisp(self, stem: str) -> bool:
         """起動中の AutoCAD に LISP を即時ロードする。
 
         AutoCAD が起動中かつアクティブドキュメントがある場合のみ実行する。
+        Returns True if the load command was sent, False if skipped (no document).
         """
         acad = self._get_app()
         if acad is None:
-            return
+            return False
         try:
             doc = acad.ActiveDocument
             if doc is None:
                 logger.debug("アクティブドキュメントなし: LISP の即時ロードをスキップ")
-                return
+                return False
             # SendCommand はコマンドラインへの入力と同等
             doc.SendCommand(f'(progn (load "{stem}" nil) (princ))\n')
             logger.info("AutoCAD に LISP を即時ロードしました: %s", stem)
+            return True
         except Exception as e:
             logger.warning("LISP の即時ロードに失敗しました (%s): %s", stem, e)
+            return False
         finally:
             del acad
 
