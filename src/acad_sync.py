@@ -18,20 +18,6 @@ from models import OperationResult
 logger = logging.getLogger(__name__)
 
 
-def _write_temp_lisp(code: str) -> str:
-    """LISP コードをテンポラリファイルに書き出してそのパスを返す。
-
-    固定ファイル名（%TEMP%\\lm_sync.lsp）を使い上書きする。
-    SendCommand 経由でロードするとコマンドラインにはファイル名だけ表示される。
-    """
-    import os
-    import tempfile
-
-    tmp_path = os.path.join(tempfile.gettempdir(), "lm_sync.lsp")
-    with open(tmp_path, "w", encoding="utf-8") as f:
-        f.write(code)
-    return tmp_path
-
 
 def _normalize(path: str) -> str:
     """Windows パスをスラッシュ区切り・小文字に正規化する（比較用）。"""
@@ -367,20 +353,17 @@ class AcadSync:
             logger.warning("Preferences.Files.TrustedPaths 失敗: %s", e)
 
         # Method 3: SendCommand で LISP 経由（AutoCAD 2027+ で COM API が非対応の場合）
-        # コマンドラインへの表示を最小化するためテンポラリファイル経由でロードする
+        # ※ファイル経由だと TRUSTEDPATHS 外でセキュリティダイアログが出るため直接送信する
         try:
             doc = acad.ActiveDocument
             if doc is not None:
                 lisp_path = repo_path.replace("\\", "\\\\")
-                lisp_code = (
+                doc.SendCommand(
                     f'(progn (if (not (vl-string-search (strcase "{lisp_path}" T)'
                     f' (strcase (getvar "TRUSTEDPATHS") T)))'
                     f' (setvar "TRUSTEDPATHS" (strcat "{lisp_path};" (getvar "TRUSTEDPATHS"))))'
-                    f' (princ))'
+                    f' (princ))\n'
                 )
-                tmp_path = _write_temp_lisp(lisp_code)
-                tmp_fwd = tmp_path.replace("\\", "/")
-                doc.SendCommand(f'(load "{tmp_fwd}" nil)(princ)\n')
                 logger.info(
                     "TRUSTEDPATHS を更新しました (SendCommand): %s", repo_path
                 )
