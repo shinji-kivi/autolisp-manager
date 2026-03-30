@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#1a1a2e"/>
+      <stop offset="100%" style="stop-color:#16213e"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#e63946"/>
+      <stop offset="100%" style="stop-color:#c1121f"/>
+    </linearGradient>
+    <linearGradient id="lGrad" x1="0%" y1="0%" x2="80%" y2="100%">
+      <stop offset="0%" style="stop-color:#ffffff"/>
+      <stop offset="100%" style="stop-color:#d4d4d4"/>
+    </linearGradient>
+  </defs>
+
+  <!-- 背景：角丸四角 -->
+  <rect x="16" y="16" width="480" height="480" rx="64" ry="64" fill="url(#bg)"/>
+
+  <!-- AutoCAD風の幾何学的「L」 -->
+  <!-- メインの L 字形（太い角張ったストローク） -->
+  <path d="
+    M 148 96
+    L 216 96
+    L 216 348
+    L 364 348
+    L 364 416
+    L 148 416
+    Z
+  " fill="url(#lGrad)"/>
+
+  <!-- 赤いアクセント：斜めカット（AutoCAD の A の折り返し風） -->
+  <path d="
+    M 216 96
+    L 280 96
+    L 280 284
+    L 216 348
+    Z
+  " fill="url(#accent)"/>
+
+  <!-- 赤いアクセント：底部の水平バー強調 -->
+  <path d="
+    M 280 348
+    L 364 348
+    L 364 416
+    L 216 416
+    L 216 348
+    Z
+  " fill="url(#accent)" opacity="0.7"/>
+
+  <!-- 細いライン装飾（CAD のグリッド線風） -->
+  <line x1="148" y1="440" x2="364" y2="440" stroke="#e63946" stroke-width="3" opacity="0.5"/>
+  <line x1="148" y1="450" x2="320" y2="450" stroke="#e63946" stroke-width="2" opacity="0.3"/>
+</svg>
