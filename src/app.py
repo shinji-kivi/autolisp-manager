@@ -62,6 +62,9 @@ class App(ctk.CTk, _DnDWrapper):
         self.minsize(480, 350)
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
+        # ウィンドウアイコン設定
+        self._set_icon()
+
         self._build_ui()
         self._refresh_list()
 
@@ -75,6 +78,30 @@ class App(ctk.CTk, _DnDWrapper):
         self.after(500, self._poll_autocad)
         # AutoCAD が未起動なら起動を促す（1.5 秒後にウィンドウが安定してから）
         self.after(1500, self._prompt_launch_autocad)
+
+    # ------------------------------------------------------------------
+    # アイコン設定
+    # ------------------------------------------------------------------
+
+    def _set_icon(self) -> None:
+        """ウィンドウアイコンを設定する。"""
+        try:
+            # PyInstaller onefile: sys._MEIPASS に展開される
+            base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent))
+            ico = base / "assets" / "logo.ico"
+            if ico.exists():
+                self.iconbitmap(str(ico))
+                return
+            # PNG フォールバック
+            png = base / "assets" / "logo.png"
+            if png.exists():
+                from PIL import Image, ImageTk
+                img = Image.open(png)
+                photo = ImageTk.PhotoImage(img)
+                self.iconphoto(True, photo)
+                self._icon_ref = photo  # GC 防止
+        except Exception:
+            logger.debug("アイコン設定をスキップしました", exc_info=True)
 
     # ------------------------------------------------------------------
     # DnD 初期化（tkinterdnd2）
@@ -418,9 +445,14 @@ class App(ctk.CTk, _DnDWrapper):
         self._config.save()
 
     def _ensure_trusted_path_registry(self) -> None:
-        """AutoCAD の起動状態に関わらず SupportPath/TRUSTEDPATHS をレジストリに永続登録する。"""
+        """AutoCAD の起動状態に関わらず SupportPath/TRUSTEDPATHS をレジストリに永続登録する。
+        末尾 \\ を付けることで AutoCAD のサブディレクトリ再帰信頼を有効にする。
+        """
         repo = str(self._manager.get_repo_dir())
-        updated = self._acad.ensure_trusted_path_registry(repo)
+        # 末尾 \ 付きで登録 → AutoCAD がサブディレクトリも信頼するか試行
+        repo_recursive = repo.rstrip("\\") + "\\..."
+        updated = self._acad.ensure_trusted_path_registry(repo_recursive)
+
         if updated:
             logger.info("SupportPath/TRUSTEDPATHS をレジストリに永続登録しました: %s", repo)
             self._set_status("信頼済みパスをレジストリに書き込みました。AutoCAD 再起動で有効になります。")
@@ -587,7 +619,7 @@ class App(ctk.CTk, _DnDWrapper):
             return
 
         app_id = "{9F3A2B1C-4D5E-6F7A-8B9C-0D1E2F3A4B5C}"
-        reg_path = f"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{app_id}"
+        reg_path = f"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{app_id}_is1"
         try:
             with winreg.OpenKey(winreg.HKEY_CURRENT_USER, reg_path) as key:
                 uninstall_str, _ = winreg.QueryValueEx(key, "UninstallString")
@@ -664,6 +696,14 @@ class App(ctk.CTk, _DnDWrapper):
             )
             name_lbl.grid(row=0, column=1, padx=(0, 5), sticky="w")
             self._name_labels.append((row, name_lbl))
+
+            # ファイル説明（@description メタデータがあれば表示）
+            if lisp.description:
+                ctk.CTkLabel(
+                    row, text=lisp.description,
+                    text_color="gray60",
+                    font=ctk.CTkFont(size=11),
+                ).grid(row=1, column=1, columnspan=2, padx=(0, 5), sticky="w")
 
             # Col 2: コマンド一覧（横スクロール可能なキャンバス）
             cmd_text = (

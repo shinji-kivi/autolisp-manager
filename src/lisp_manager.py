@@ -36,6 +36,15 @@ class LispManager:
     _DISABLED_PATTERN: re.Pattern = re.compile(
         r"^;;\s*\(load\s+\"([^\"]+)\"\)", re.IGNORECASE
     )
+    _BUTTON_PATTERN: re.Pattern = re.compile(
+        r"^;;;\s*@button\s+([a-zA-Z_][a-zA-Z0-9_-]*)\s+(.+)$", re.MULTILINE
+    )
+    _DESCRIPTION_PATTERN: re.Pattern = re.compile(
+        r"^;;;\s*@description\s+(.+)$", re.MULTILINE
+    )
+
+    # ag-help 共通ヘルプシステムのファイル名
+    _BUILTIN_FILES: list[str] = ["ag-help.lsp", "ag-help.dcl"]
 
     def __init__(self, repo_path: str) -> None:
         self._repo_dir = Path(repo_path)
@@ -43,6 +52,9 @@ class LispManager:
         self._acaddoc_path = self._repo_dir / "acaddoc.lsp"
         self._launcher_lisp: str | None = None
         logger.debug("LispManager 初期化: repo=%s", self._repo_dir)
+
+        # 共通ヘルプシステム（ag-help.lsp / ag-help.dcl）をリポジトリに配置
+        self._deploy_builtin_files()
 
         # 起動時に acaddoc.lsp を最新状態に同期する
         # （存在しない場合は新規作成、既存の場合も TRUSTEDPATHS 行などを最新化）
@@ -86,6 +98,9 @@ class LispManager:
                 f"{src.name} のコピーに失敗しました。",
                 detail=str(e),
             )
+
+        # README ファイルがあれば一緒にコピー（{stem}_README.md として保存）
+        self._copy_readme(src, dest.stem)
 
         result = self._write_acaddoc(self._read_disabled())
         if not result.success:
@@ -174,12 +189,16 @@ class LispManager:
         disabled = self._read_disabled()
         entries: list[LispEntry] = []
         for lsp in self._list_lsp_files():
+            meta = self._extract_metadata(lsp)
             entries.append(
                 LispEntry(
                     name=lsp.name,
                     path=lsp,
                     commands=self._extract_commands(lsp),
                     enabled=lsp.stem not in disabled,
+                    description=meta["description"],
+                    button_labels=meta["button_labels"],
+                    readme_file=meta["readme_file"],
                 )
             )
         return entries
@@ -277,9 +296,10 @@ class LispManager:
         return dest
 
     def _list_lsp_files(self) -> list[Path]:
-        """リポジトリ内の .lsp ファイル（acaddoc.lsp を除く）を返す。"""
+        """リポジトリ内の .lsp ファイル（acaddoc.lsp, ag-help.lsp を除く）を返す。"""
+        exclude = {"acaddoc.lsp", "ag-help.lsp"}
         return [
-            p for p in self._repo_dir.glob("*.lsp") if p.name != "acaddoc.lsp"
+            p for p in self._repo_dir.glob("*.lsp") if p.name not in exclude
         ]
 
     def _read_disabled(self) -> set[str]:
@@ -318,7 +338,13 @@ class LispManager:
         先頭に TRUSTEDPATHS 自己登録コードを埋め込む（セキュリティダイアログ回避）。
         """
         lines: list[str] = [self.START_MARKER, self._TRUSTED_SELF_REGISTER]
+        # 共通ヘルプシステムを最初にロード
+        ag_help = self._repo_dir / "ag-help.lsp"
+        if ag_help.exists():
+            lines.append('(load "ag-help" nil)')
         for lsp in self._list_lsp_files():
+            if lsp.stem == "ag-help":
+                continue  # 上で既にロード済み
             load_line = f'(load "{lsp.stem}" nil)'
             if lsp.stem in disabled:
                 load_line = f';; (load "{lsp.stem}")'
@@ -352,3 +378,57 @@ class LispManager:
             return []
         matches = self._COMMAND_PATTERN.findall(content)
         return sorted(set(matches))
+
+    def _extract_metadata(self, file_path: Path) -> dict:
+        """LISP ファイルから @button, @description メタデータを抽出する。"""
+        try:
+            content = file_path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return {"description": "", "button_labels": {}, "readme_file": ""}
+
+        desc_match = self._DESCRIPTION_PATTERN.search(content)
+        description = desc_match.group(1).strip() if desc_match else ""
+
+        button_labels: dict[str, str] = {}
+        for m in self._BUTTON_PATTERN.finditer(content):
+            button_labels[m.group(1)] = m.group(2).strip()
+
+        return {
+            "description": description,
+            "button_labels": button_labels,
+            "readme_file": f"{file_path.stem}_README.md",
+        }
+
+    def _copy_readme(self, src_lsp: Path, dest_stem: str) -> None:
+        """LISP ファイルと同じフォルダにある README を {stem}_README.md としてコピーする。"""
+        for name in ("README.md", "README.txt"):
+            readme_src = src_lsp.parent / name
+            if readme_src.exists():
+                ext = Path(name).suffix
+                readme_dest = self._repo_dir / f"{dest_stem}_README{ext}"
+                try:
+                    shutil.copy2(readme_src, readme_dest)
+                    logger.info("README をコピーしました: %s → %s", readme_src.name, readme_dest.name)
+                except OSError as e:
+                    logger.warning("README のコピーに失敗しました: %s", e)
+                return
+
+    def _deploy_builtin_files(self) -> None:
+        """共通ヘルプシステム（ag-help.lsp, ag-help.dcl）をリポジトリに配置する。"""
+        import sys
+        if getattr(sys, "frozen", False):
+            # PyInstaller EXE モード
+            base = Path(sys._MEIPASS) / "assets"
+        else:
+            # スクリプトモード
+            base = Path(__file__).parent.parent / "assets"
+
+        for filename in self._BUILTIN_FILES:
+            src = base / filename
+            dest = self._repo_dir / filename
+            if src.exists():
+                try:
+                    shutil.copy2(src, dest)
+                    logger.debug("ビルトインファイルを配置: %s", filename)
+                except OSError as e:
+                    logger.warning("ビルトインファイルの配置に失敗: %s: %s", filename, e)

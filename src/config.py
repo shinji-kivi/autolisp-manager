@@ -13,7 +13,7 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 _DEFAULT_REPO = str(
-    Path(os.environ.get("APPDATA", "")) / "Autodesk" / "Support" / "Tool_LISP"
+    Path(os.environ.get("APPDATA", "")) / "Autodesk" / "ApplicationPlugins" / "Tool_LISP"
 )
 _CONFIG_PATH = Path(os.environ.get("APPDATA", "")) / ".lisp_manager_config.json"
 

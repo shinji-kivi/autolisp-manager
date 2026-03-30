@@ -32,10 +32,15 @@ env/
 Thumbs.db
 desktop.ini
 
+# C# ビルド成果物
+panel/AutoLispPanel/bin/
+panel/AutoLispPanel/obj/
+
 # Project-specific
 # ビルド成果物（EXEはGitHub Releasesで配布）
 dist/
 build/
+installer_output/
 
 # ドキュメント（内部用）
 デバッグチェックリスト.md

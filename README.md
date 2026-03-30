@@ -11,8 +11,8 @@ AutoCAD の AutoLISPファイルをかんたんに管理するデスクトップ
 
 👉 **[最新版をダウンロード（GitHub Releases）](https://github.com/shinji-kivi/autolisp-manager/releases/latest)**
 
-`autolisp-manager.exe` を任意のフォルダに保存して実行するだけで使えます。
-インストール不要・単一ファイル。
+`Setup_AutoLISP管理ツール_1.0.0.exe` を実行してインストールしてください。
+管理者権限は不要です（ユーザーローカルにインストールされます）。
 
 > ⚠️ Windows SmartScreen の警告が出る場合は「詳細情報」→「実行」を選択してください。
 
@@ -26,7 +26,9 @@ AutoCAD の AutoLISPファイルをかんたんに管理するデスクトップ
 | **有効 / 無効 切り替え** | スイッチ1つでロードのオン・オフ |
 | **コマンド表示** | 各 LISP が定義するコマンド名を自動抽出・表示 |
 | **リポジトリ管理** | LISPファイルを指定フォルダに自動コピー・重複リネーム |
-| **TRUSTEDPATHS 更新** | AutoCAD 起動中にセキュリティパスを自動登録 |
+| **TRUSTEDPATHS 自動登録** | インストール時およびアプリ起動時にセキュリティパスを自動登録 |
+| **AutoCAD リボンパネル** | AutoCAD のリボンに LISP Manager タブを追加（パネル表示トグル・管理ツール起動） |
+| **完全アンインストール** | レジストリ・設定ファイル・リボンパネルをすべてクリーンアップ |
 
 ---
 
@@ -35,68 +37,92 @@ AutoCAD の AutoLISPファイルをかんたんに管理するデスクトップ
 > **📁 バックアップのおすすめ**
 > 追加したLISPファイルはアプリが管理する専用フォルダに自動コピーされますが、「×」ボタンや初期化操作を行うとそのフォルダからも削除されます。大切なLISPファイルは、アプリとは別の場所にも控えを保存しておくことをおすすめします。
 
-1. `autolisp-manager.exe` を起動
+1. インストーラーを実行（インストール完了後にアプリが自動起動します）
 2. **「LISP を追加」** ボタンからファイルを選択、またはアプリの画面に直接ドラッグ＆ドロップで LISPファイルを登録
    （LISPファイルは移動ではなく、指定フォルダにコピーされます）
 3. AutoCAD を起動すると登録した LISP が自動でロードされます
 4. スイッチで有効 / 無効を切り替え
 5. 不要なファイルは各ファイル右側の **「×」ボタン** で削除できます（登録先フォルダからも削除されるので注意）
-6. セットアップ後は AutoCAD のコマンドラインに **`LISP_MANAGER`** と入力してアプリを直接起動することもできます
+6. AutoCAD のリボンに追加される **「LISP Manager」タブ** からもアプリを起動できます
 
 ### 初回起動時の注意
 
-AutoCAD が LISPファイルを読み込む際、セキュリティ確認ダイアログが表示される場合があります。
+インストーラーが AutoCAD の信頼済みパス（TRUSTEDPATHS）を自動登録するため、通常はセキュリティダイアログは表示されません。
 
-> **「常にロード」または「1回のみロード」を選択してください。**
-
-このアプリは LISPフォルダを AutoCAD の信頼済みパス（TRUSTEDPATHS）に自動登録するため、正常にセットアップが完了すると以降はダイアログが表示されなくなります。
+万が一表示された場合は **「常にロード」または「1回のみロード」** を選択してください。
 
 ---
 
 ## 仕組み
 
-- `%APPDATA%\Autodesk\Support\Tool_LISP\acaddoc.lsp` を生成し、AutoCAD のサポートパスに追加することで自動ロードを実現
+- `%APPDATA%\Autodesk\ApplicationPlugins\Tool_LISP\acaddoc.lsp` を生成し、AutoCAD のサポートパスに追加することで自動ロードを実現
+- インストール時に `ApplicationPlugins\...` を TRUSTEDPATHS に登録し、セキュリティダイアログを抑制
+- AutoCAD リボンパネル（AutoLispPanel.bundle）がリボンタブを追加
 - 設定は `%APPDATA%\.lisp_manager_config.json` に保存されます
-- EXE の場所は問いません（デスクトップでも USB でも OK）
+- アプリは `%LOCALAPPDATA%\AutoLISP管理ツール` にインストールされます
 
 ---
 
 ## 動作環境
 
 - Windows 10 / 11（64bit）
-- AutoCAD 2020 以降
+- AutoCAD 2026 / 2027
 
 ---
 
-## 削除・クリーンアップ
+## アンインストール
 
-このアプリはインストーラーを使用しないため、以下のファイルを手動で削除してください。
+Windows の「設定」→「アプリ」→「AutoLISP管理ツール」からアンインストールできます。
+アプリ内の「アンインストール」ボタンからも実行可能です。
 
-| 削除するもの | パス |
-|------------|------|
-| アプリ本体 | `autolisp-manager.exe`（保存した場所） |
+以下が自動的に削除されます:
+
+| 削除対象 | 内容 |
+|---------|------|
+| アプリ本体 | `%LOCALAPPDATA%\AutoLISP管理ツール` |
+| リボンパネル | `%APPDATA%\Autodesk\ApplicationPlugins\AutoLispPanel.bundle` |
+| LISP リポジトリ | `%APPDATA%\Autodesk\ApplicationPlugins\Tool_LISP`（カスタムパス設定時のみ） |
 | 設定ファイル | `%APPDATA%\.lisp_manager_config.json` |
-| 自動ロード設定 | `%APPDATA%\Autodesk\Support\Tool_LISP\` フォルダごと |
-
-> 削除後に AutoCAD の「オプション」→「ファイル」→「サポートファイル検索パス」から `Tool_LISP` のパスを手動で取り除いてください。
+| レジストリ | TRUSTEDPATHS / ACAD から登録パスを除去 |
 
 ---
 
 ## 開発者向け（ソースからビルド）
 
+### 前提
+
+- Python 3.11 以上
+- .NET SDK 8.0 以上（AutoCAD 2026 パネル用）/ .NET 10.0（AutoCAD 2027 パネル用）
+- Inno Setup 6（インストーラービルド用）
+
+### ビルド
+
 ```bash
 # 依存ライブラリのインストール
 pip install -r requirements.txt
 
-# アプリ起動
+# アプリ起動（開発用）
 cd src
 python main.py
 
-# EXE ビルド
+# 全体ビルド（EXE + パネルDLL + バンドル配置）
 build.bat
+
+# インストーラービルド
+iscc installer.iss
 ```
 
-**必要な Python バージョン**: 3.11 以上
+### プロジェクト構成
+
+```
+src/                   Python アプリケーション
+panel/                 AutoCAD リボンパネル（C#）
+  AutoLispPanel/         パネル DLL ソース
+  bundle/                ApplicationPlugins バンドル定義
+assets/                アイコン・ロゴ
+installer.iss          Inno Setup インストーラースクリプト
+build.bat              統合ビルドスクリプト
+```
 
 ---
 

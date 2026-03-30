@@ -120,11 +120,15 @@ class PaletteSync:
                     item_el, "StockToolRef", {"idValue": _COMMAND_TOOL_CLSID}
                 )
 
-                # ツールプロパティ
+                # ツールプロパティ（日本語ラベルがあればボタン名に使用）
                 props_el = ET.SubElement(item_el, "Properties")
-                ET.SubElement(props_el, "Name").text = cmd
+                label = lisp.button_labels.get(cmd, cmd)
+                ET.SubElement(props_el, "Name").text = label
+                desc_parts = [f"{lisp.name} ({cmd})"]
+                if lisp.description:
+                    desc_parts.append(lisp.description)
                 ET.SubElement(props_el, "Description").text = (
-                    f"{lisp.name} ({cmd})"
+                    " - ".join(desc_parts)
                 )
                 ET.SubElement(props_el, "Macro").text = f"^C^C{cmd} "
 

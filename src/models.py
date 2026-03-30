@@ -15,6 +15,9 @@ class LispEntry:
     path: Path          # フルパス
     commands: list[str] = field(default_factory=list)  # 抽出されたコマンド名
     enabled: bool = True                                # 有効/無効
+    description: str = ""                               # @description メタデータ
+    button_labels: dict[str, str] = field(default_factory=dict)  # コマンド名→日本語ラベル
+    readme_file: str = ""                               # 関連READMEファイル名
 
 
 @dataclass
