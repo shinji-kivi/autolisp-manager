@@ -26,8 +26,8 @@
                           Margin="4,4,4,4">
                 <ItemsControl.ItemTemplate>
                     <DataTemplate>
-                        <Button Content="{Binding CommandName}"
-                                ToolTip="{Binding SourceFile}"
+                        <Button Content="{Binding DisplayLabel}"
+                                ToolTip="{Binding CommandName}"
                                 Click="OnCommandButtonClick"
                                 Margin="4,2"
                                 Height="28"

@@ -21,6 +21,11 @@ public static class LispScanner
         @"\(\s*defun\s+c:([a-zA-Z_][a-zA-Z0-9_\-]*)",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
+    // @button メタデータパターン
+    private static readonly Regex ButtonRe = new(
+        @"^;;;\s*@button\s+([a-zA-Z_][a-zA-Z0-9_\-]*)\s+(.+)$",
+        RegexOptions.Multiline | RegexOptions.Compiled);
+
     /// <summary>
     /// acaddoc.lsp を解析し、有効な LISP ファイルのコマンド一覧を返す。
     /// </summary>
@@ -54,27 +59,39 @@ public static class LispScanner
             if (!File.Exists(lispPath))
                 continue;
 
-            var commands = ExtractCommands(lispPath);
+            var content = ReadFileContent(lispPath);
+            if (content == null)
+                continue;
+
+            var labels = ExtractButtonLabels(content);
+            var commands = ExtractCommandsFromContent(content);
             foreach (var cmd in commands)
-                result.Add(new LispCommand(cmd, Path.GetFileName(lispPath)));
+            {
+                var label = labels.TryGetValue(cmd, out var l) ? l : cmd;
+                result.Add(new LispCommand(cmd, Path.GetFileName(lispPath), label));
+            }
         }
 
         return result;
     }
 
-    private static IEnumerable<string> ExtractCommands(string lispPath)
+    private static string? ReadFileContent(string lispPath)
     {
-        string content;
-        try
-        {
-            content = File.ReadAllText(lispPath);
-        }
-        catch
-        {
-            yield break;
-        }
+        try { return File.ReadAllText(lispPath); }
+        catch { return null; }
+    }
 
+    private static IEnumerable<string> ExtractCommandsFromContent(string content)
+    {
         foreach (Match m in DefunRe.Matches(content))
             yield return m.Groups[1].Value.ToUpperInvariant();
+    }
+
+    private static Dictionary<string, string> ExtractButtonLabels(string content)
+    {
+        var labels = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (Match m in ButtonRe.Matches(content))
+            labels[m.Groups[1].Value.ToUpperInvariant()] = m.Groups[2].Value.Trim();
+        return labels;
     }
 }
