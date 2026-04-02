@@ -3,10 +3,7 @@
 PyInstaller spec file for AutoLISP管理ツール
 ビルド方法: pyinstaller "AutoLISP管理ツール.spec"
 
-onefile モード: 単一 EXE として配布できる。
-2番目のインスタンス検出時に os._exit() で即プロセス終了するため、
-ブートローダーの後片付けが走らず「Failed to remove temporary directory」
-警告ダイアログが出ない。
+onedir モード: インストーラーで配布するため _MEI* 一時ディレクトリ問題を回避。
 """
 from PyInstaller.utils.hooks import collect_data_files
 
@@ -51,21 +48,27 @@ pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
     [],
+    exclude_binaries=True,
     name="AutoLISP管理ツール",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
-    upx_exclude=[],
-    runtime_tmpdir=None,
-    console=False,          # コンソールウィンドウ非表示
+    upx=False,
+    console=False,
     disable_windowed_traceback=False,
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
     icon="assets/logo.ico",
+)
+
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.zipfiles,
+    a.datas,
+    strip=False,
+    upx=False,
+    name="AutoLISP管理ツール",
 )

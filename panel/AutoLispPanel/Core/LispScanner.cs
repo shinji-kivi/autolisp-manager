@@ -26,6 +26,11 @@ public static class LispScanner
         @"^;;;\s*@button\s+([a-zA-Z_][a-zA-Z0-9_\-]*)\s+(.+)$",
         RegexOptions.Multiline | RegexOptions.Compiled);
 
+    // @description メタデータパターン
+    private static readonly Regex DescriptionRe = new(
+        @"^;;;\s*@description\s+(.+)$",
+        RegexOptions.Multiline | RegexOptions.Compiled);
+
     /// <summary>
     /// acaddoc.lsp を解析し、有効な LISP ファイルのコマンド一覧を返す。
     /// </summary>
@@ -93,5 +98,74 @@ public static class LispScanner
         foreach (Match m in ButtonRe.Matches(content))
             labels[m.Groups[1].Value.ToUpperInvariant()] = m.Groups[2].Value.Trim();
         return labels;
+    }
+
+    private static string ExtractDescription(string content)
+    {
+        var m = DescriptionRe.Match(content);
+        return m.Success ? m.Groups[1].Value.Trim() : "";
+    }
+
+    /// <summary>
+    /// acaddoc.lsp を解析し、LISPファイルごとにグループ化したコマンド一覧を返す。
+    /// </summary>
+    public static List<LispGroup> ScanGrouped(string acaddocPath)
+    {
+        var result = new List<LispGroup>();
+
+        if (!File.Exists(acaddocPath))
+            return result;
+
+        var repoDir = Path.GetDirectoryName(acaddocPath)!;
+        var lines = File.ReadAllLines(acaddocPath);
+
+        foreach (var line in lines)
+        {
+            if (DisabledLoadRe.IsMatch(line))
+                continue;
+
+            var loadMatch = EnabledLoadRe.Match(line);
+            if (!loadMatch.Success)
+                continue;
+
+            var stem = loadMatch.Groups[1].Value;
+            var fileName = stem.EndsWith(".lsp", StringComparison.OrdinalIgnoreCase)
+                ? stem
+                : stem + ".lsp";
+
+            // ag-help.lsp はユーティリティなのでパネルに表示しない
+            if (fileName.Equals("ag-help.lsp", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            var lispPath = Path.Combine(repoDir, fileName);
+            if (!File.Exists(lispPath))
+                continue;
+
+            var content = ReadFileContent(lispPath);
+            if (content == null)
+                continue;
+
+            var labels = ExtractButtonLabels(content);
+            var description = ExtractDescription(content);
+            var commands = new List<LispCommand>();
+
+            foreach (var cmd in ExtractCommandsFromContent(content))
+            {
+                var label = labels.TryGetValue(cmd, out var l) ? l : cmd;
+                commands.Add(new LispCommand(cmd, Path.GetFileName(lispPath), label));
+            }
+
+            if (commands.Count == 0)
+                continue;
+
+            // 表示名: @description があればそれを使い、なければファイル名
+            var displayName = string.IsNullOrEmpty(description)
+                ? Path.GetFileNameWithoutExtension(lispPath)
+                : description;
+
+            result.Add(new LispGroup(Path.GetFileName(lispPath), displayName, commands));
+        }
+
+        return result;
     }
 }

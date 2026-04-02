@@ -446,19 +446,20 @@ class App(ctk.CTk, _DnDWrapper):
 
     def _ensure_trusted_path_registry(self) -> None:
         """AutoCAD の起動状態に関わらず SupportPath/TRUSTEDPATHS をレジストリに永続登録する。
-        末尾 \\ を付けることで AutoCAD のサブディレクトリ再帰信頼を有効にする。
+        ApplicationPlugins\... を登録し、サブディレクトリ（Tool_LISP 含む）を再帰的に信頼させる。
         """
         repo = str(self._manager.get_repo_dir())
-        # 末尾 \ 付きで登録 → AutoCAD がサブディレクトリも信頼するか試行
-        repo_recursive = repo.rstrip("\\") + "\\..."
-        updated = self._acad.ensure_trusted_path_registry(repo_recursive)
+        # ApplicationPlugins\... を登録（Tool_LISP の親ディレクトリ）
+        app_plugins = str(Path(repo).parent)
+        trusted_path = app_plugins.rstrip("\\") + "\\..."
+        updated = self._acad.ensure_trusted_path_registry(trusted_path)
 
         if updated:
-            logger.info("SupportPath/TRUSTEDPATHS をレジストリに永続登録しました: %s", repo)
+            logger.info("SupportPath/TRUSTEDPATHS をレジストリに永続登録しました: %s", app_plugins)
             self._set_status("信頼済みパスをレジストリに書き込みました。AutoCAD 再起動で有効になります。")
         else:
-            logger.debug("SupportPath/TRUSTEDPATHS は既にレジストリに登録済みです: %s", repo)
-            self._set_status(f"信頼済みパス: 登録済み ({Path(repo).name})")
+            logger.debug("SupportPath/TRUSTEDPATHS は既にレジストリに登録済みです: %s", app_plugins)
+            self._set_status(f"信頼済みパス: 登録済み ({Path(app_plugins).name})")
 
     def _auto_add_paths(self) -> None:
         """AutoCAD が起動中であればリポジトリパスを登録する（手動トリガー用）。"""

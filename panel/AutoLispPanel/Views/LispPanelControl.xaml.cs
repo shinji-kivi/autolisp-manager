@@ -1,4 +1,5 @@
 using System.IO;
+using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using AcadApp = Autodesk.AutoCAD.ApplicationServices.Application;
@@ -32,14 +33,15 @@ public partial class LispPanelControl : IDisposable
 
         if (_acaddocPath == null)
         {
-            CommandList.ItemsSource = null;
+            GroupList.ItemsSource = null;
             StatusText.Text = "設定ファイルが見つかりません";
             return;
         }
 
-        var commands = LispScanner.Scan(_acaddocPath);
-        CommandList.ItemsSource = commands;
-        StatusText.Text = $"{commands.Count} コマンド";
+        var groups = LispScanner.ScanGrouped(_acaddocPath);
+        GroupList.ItemsSource = groups;
+        var totalCommands = groups.Sum(g => g.Commands.Count);
+        StatusText.Text = $"{groups.Count} ファイル / {totalCommands} コマンド";
     }
 
     private void StartWatcher()

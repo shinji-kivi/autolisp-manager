@@ -54,8 +54,8 @@ Name: "japanese"; MessagesFile: "compiler:Languages\Japanese.isl"
 Name: "desktopicon"; Description: "デスクトップにショートカットを作成する"; GroupDescription: "追加タスク:"
 
 [Files]
-; メインの EXE（dist フォルダからコピー）
-Source: "dist\{#AppExeName}"; DestDir: "{app}"; Flags: ignoreversion
+; アプリケーション（onedir ビルド成果物をまるごとコピー）
+Source: "dist\AutoLISP管理ツール\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs
 ; AutoCAD リボンパネル バンドル
 Source: "panel\bundle\PackageContents.xml"; DestDir: "{userappdata}\Autodesk\ApplicationPlugins\AutoLispPanel.bundle"; Flags: ignoreversion
 Source: "assets\logo.png";                  DestDir: "{userappdata}\Autodesk\ApplicationPlugins\AutoLispPanel.bundle"; Flags: ignoreversion
@@ -88,6 +88,23 @@ Filename: "taskkill.exe"; Parameters: "/f /im ""{#AppExeName}"""; \
 ;   3. Inno Setup が EXE 本体を削除
 
 [Code]
+function InitializeSetup(): Boolean;
+var
+  UninstallKey: string;
+  InstalledPath: string;
+begin
+  Result := True;
+  UninstallKey := 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{9F3A2B1C-4D5E-6F7A-8B9C-0D1E2F3A4B5C}_is1';
+  if RegQueryStringValue(HKCU, UninstallKey, 'InstallLocation', InstalledPath) then
+  begin
+    case MsgBox('AutoLISP管理ツール は既にインストールされています。' + #13#10 + #13#10 +
+                '再インストール（上書き更新）しますか？',
+                mbConfirmation, MB_YESNO) of
+      IDNO: Result := False;
+    end;
+  end;
+end;
+
 procedure RegisterTrustedPaths();
 var
   ScriptPath: string;
