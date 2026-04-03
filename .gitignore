@@ -1,5 +1,7 @@
 # Claude
 .claude/
+CLAUDE.md
+.mcp.json
 
 # Python
 __pycache__/
@@ -31,6 +33,9 @@ env/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# 不要な画像
+Gemini_Generated_Image_*
 
 # C# ビルド成果物
 panel/AutoLispPanel/bin/

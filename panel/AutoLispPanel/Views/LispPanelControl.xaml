@@ -130,7 +130,7 @@
                           Margin="4,0,4,4">
                 <ItemsControl.ItemTemplate>
                     <DataTemplate>
-                        <Expander IsExpanded="True">
+                        <Expander IsExpanded="False">
                             <Expander.Style>
                                 <Style TargetType="Expander">
                                     <Setter Property="Template">
