@@ -17,6 +17,7 @@ build/
 
 # PyInstaller
 *.manifest
+*.spec
 
 # Virtual environments
 venv/
