@@ -313,7 +313,9 @@ class App(ctk.CTk, _DnDWrapper):
         files = filedialog.askopenfilenames(
             title="追加する LISP ファイルを選択",
             filetypes=[
-                ("AutoLISP ファイル", "*.lsp"),
+                ("AutoLISP ファイル", "*.lsp *.fas *.vlx"),
+                ("ソース版 (.lsp)", "*.lsp"),
+                ("コンパイル版 (.fas / .vlx)", "*.fas *.vlx"),
                 ("すべてのファイル", "*.*"),
             ],
         )
@@ -325,9 +327,15 @@ class App(ctk.CTk, _DnDWrapper):
         try:
             files = self.tk.splitlist(event.data)
             logger.debug("D&D 受信: %s", files)
-            lsp_files = [f for f in files if f.lower().endswith(".lsp")]
+            lsp_files = [
+                f for f in files
+                if f.lower().endswith(LispManager.LISP_EXTENSIONS)
+            ]
             if not lsp_files:
-                messagebox.showwarning("警告", ".lsp ファイルのみ登録できます。")
+                messagebox.showwarning(
+                    "警告",
+                    ".lsp / .fas / .vlx ファイルのみ登録できます。",
+                )
                 return
             self._register_files(lsp_files)
         except Exception:
@@ -355,7 +363,8 @@ class App(ctk.CTk, _DnDWrapper):
             return
         if enabled:
             # 有効化: AutoCAD が起動中なら即時ロード
-            self._acad.load_lisp(stem)
+            # コンパイル版は拡張子付きで渡す（ソース版と紛れないようにするため）
+            self._acad.load_lisp(self._manager.get_load_target(stem))
         else:
             # 無効化: AutoCAD が起動中なら定義済みコマンドを即時削除
             commands = self._manager.get_commands(stem)
@@ -810,7 +819,7 @@ class App(ctk.CTk, _DnDWrapper):
                     logger.warning(acad_result.detail or acad_result.message)
                 # AutoCAD が起動中かつドキュメントが開いていれば即時ロード
                 stem = os.path.splitext(os.path.basename(f))[0]
-                self._acad.load_lisp(stem)
+                self._acad.load_lisp(self._manager.get_load_target(stem))
             else:
                 errors.append(result.message)
 

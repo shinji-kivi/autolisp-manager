@@ -42,9 +42,28 @@ class LispManager:
     _DESCRIPTION_PATTERN: re.Pattern = re.compile(
         r"^;;;\s*@description\s+(.+)$", re.MULTILINE
     )
+    # サイドカー (.meta) 専用。コンパイル版はコマンド名を復元できないため、
+    # 生成時に (defun c:...) から拾った全コマンドをこの形式で書き出しておく。
+    _META_COMMAND_PATTERN: re.Pattern = re.compile(
+        r"^;;;\s*@command\s+([a-zA-Z_][a-zA-Z0-9_-]*)\s*$", re.MULTILINE
+    )
 
     # ag-help 共通ヘルプシステムのファイル名
     _BUILTIN_FILES: list[str] = ["ag-help.lsp", "ag-help.dcl"]
+
+    # 登録できる LISP ファイルの拡張子。
+    # 同一 stem で複数の形式が存在する場合は、この順（先頭優先）で 1 つだけ採用する。
+    # コンパイル版を優先するのは、配布物として .fas / .vlx を置いたときに
+    # 古い .lsp が残っていても意図せずソース版がロードされないようにするため。
+    LISP_EXTENSIONS: tuple[str, ...] = (".vlx", ".fas", ".lsp")
+
+    # ソースとしてテキスト解析できる拡張子（コマンド名・メタデータ抽出の対象）
+    _SOURCE_EXTENSIONS: frozenset[str] = frozenset({".lsp"})
+
+    # コンパイル版に添えるメタデータのサイドカー拡張子。
+    # .fas / .vlx は文字列テーブルが難読化されていてコマンド名を復元できないため、
+    # @description / @button / @command をテキストで別ファイルに持たせる。
+    META_SUFFIX: str = ".meta"
 
     def __init__(self, repo_path: str) -> None:
         self._repo_dir = Path(repo_path)
@@ -80,14 +99,19 @@ class LispManager:
     def register(self, src_path: str) -> OperationResult:
         """LISP ファイルをリポジトリにコピーし、acaddoc.lsp に登録する。
 
+        ソース版 (.lsp) とコンパイル版 (.fas / .vlx) のどちらも登録できる。
         同名ファイルが存在する場合は連番リネームする（例: file_2.lsp）。
         """
         src = Path(src_path)
 
         if not src.exists():
             return OperationResult.fail(f"ファイルが見つかりません: {src.name}")
-        if src.suffix.lower() != ".lsp":
-            return OperationResult.fail(f".lsp ファイルではありません: {src.name}")
+        if src.suffix.lower() not in self.LISP_EXTENSIONS:
+            exts = " / ".join(self.LISP_EXTENSIONS)
+            return OperationResult.fail(f"{exts} ファイルではありません: {src.name}")
+
+        # 同一 stem の別形式が既に登録済みかを、コピー前に調べておく
+        shadowed = self._find_same_stem(src.stem, exclude_suffix=src.suffix.lower())
 
         dest = self._resolve_dest(src)
         try:
@@ -102,15 +126,30 @@ class LispManager:
         # README ファイルがあれば一緒にコピー（{stem}_README.md として保存）
         self._copy_readme(src, dest.stem)
 
+        # コンパイル版はメタデータのサイドカー（{stem}.meta）を用意する
+        meta_note = ""
+        if src.suffix.lower() not in self._SOURCE_EXTENSIONS:
+            meta_note = self._prepare_meta(src, dest.stem)
+
         result = self._write_acaddoc(self._read_disabled())
         if not result.success:
             return result
 
         logger.info("LISP を登録しました: %s → %s", src.name, dest.name)
-        return OperationResult.ok(
-            f"{dest.name} を登録しました。",
-            detail=f"コピー先: {dest}",
-        )
+
+        # 同一 stem の別形式が残っている場合は、どちらがロードされるかを明示する
+        detail = f"コピー先: {dest}"
+        if meta_note:
+            detail += f"\n{meta_note}"
+        if shadowed:
+            winner = self._pick_preferred([*shadowed, dest])
+            others = ", ".join(sorted(p.name for p in [*shadowed, dest] if p != winner))
+            detail += (
+                f"\n同名の別形式があるため {winner.name} のみをロードします"
+                f"（{others} は無視されます）。"
+            )
+
+        return OperationResult.ok(f"{dest.name} を登録しました。", detail=detail)
 
     def remove(self, path: str) -> OperationResult:
         """LISP ファイルを削除し、acaddoc.lsp を更新する。"""
@@ -125,6 +164,15 @@ class LispManager:
                 f"{target.name} の削除に失敗しました。",
                 detail=str(e),
             )
+
+        # サイドカー（メタデータ）も道連れにする
+        meta = self._meta_path(target.stem)
+        if meta.exists():
+            try:
+                meta.unlink()
+                logger.info("メタデータを削除しました: %s", meta.name)
+            except OSError as e:
+                logger.warning("メタデータの削除に失敗しました: %s", e)
 
         # 削除されたファイルの stem を無効リストからも除外してから再生成
         disabled = self._read_disabled()
@@ -181,8 +229,19 @@ class LispManager:
 
     def get_commands(self, stem: str) -> list[str]:
         """指定 stem の LISP ファイルからコマンド名一覧を返す。"""
-        lsp_file = self._repo_dir / f"{stem}.lsp"
+        lsp_file = self._find_by_stem(stem)
+        if lsp_file is None:
+            return []
         return self._extract_commands(lsp_file)
+
+    def get_load_target(self, stem: str) -> str:
+        """指定 stem を (load "...") に渡すときの文字列を返す。
+
+        コンパイル版 (.fas / .vlx) は拡張子付きで返す。
+        実体が見つからない場合は stem をそのまま返す（従来動作）。
+        """
+        path = self._find_by_stem(stem)
+        return self._load_target(path) if path is not None else stem
 
     def list_all(self) -> list[LispEntry]:
         """登録済み LISP の一覧を返す。"""
@@ -209,9 +268,11 @@ class LispManager:
         マーカー外にユーザーが書いたコードは保持する。
         バックアップファイル (.bak) およびツールが生成した Palettes フォルダも削除する。
         """
-        # 1) LISP ファイルを全削除
+        # 1) LISP ファイルとメタデータを全削除
+        #    （同一 stem の重複も残さないよう、絞り込み前の一覧を使う）
         delete_errors: list[str] = []
-        for lsp in self._list_lsp_files():
+        targets = [*self._glob_lisp_files(), *self._repo_dir.glob(f"*{self.META_SUFFIX}")]
+        for lsp in targets:
             try:
                 lsp.unlink()
                 logger.info("LISP ファイルを削除しました: %s", lsp.name)
@@ -295,12 +356,93 @@ class LispManager:
                 counter += 1
         return dest
 
+    def _to_stem(self, load_target: str) -> str:
+        """(load "...") に書かれた文字列を stem に正規化する。
+
+        .fas / .vlx は拡張子付きで書かれるため取り除く。
+        LISP の拡張子以外は落とさない（stem にドットを含む名前を壊さないため）。
+        """
+        p = Path(load_target)
+        if p.suffix.lower() in self.LISP_EXTENSIONS:
+            return p.stem
+        return load_target
+
+    def _load_target(self, path: Path) -> str:
+        """(load "...") に渡す文字列を返す。
+
+        .lsp は従来どおり拡張子なし（後方互換）。
+        .fas / .vlx は拡張子を明示する。拡張子なしだと AutoCAD 側の探索順に
+        委ねることになり、同名のソース版が残っていたときにどちらが読まれるか
+        分からなくなるため。
+        """
+        if path.suffix.lower() == ".lsp":
+            return path.stem
+        return path.name
+
+    def _pick_preferred(self, candidates: list[Path]) -> Path:
+        """同一 stem の候補から LISP_EXTENSIONS の優先順で 1 つ選ぶ。"""
+        return min(
+            candidates,
+            key=lambda p: self.LISP_EXTENSIONS.index(p.suffix.lower()),
+        )
+
+    def _find_same_stem(
+        self, stem: str, exclude_suffix: str | None = None
+    ) -> list[Path]:
+        """リポジトリ内で同じ stem を持つ LISP ファイルを返す。"""
+        found: list[Path] = []
+        for ext in self.LISP_EXTENSIONS:
+            if exclude_suffix is not None and ext == exclude_suffix:
+                continue
+            p = self._repo_dir / f"{stem}{ext}"
+            if p.exists():
+                found.append(p)
+        return found
+
+    def _find_by_stem(self, stem: str) -> Path | None:
+        """stem から実体のファイルを 1 つ返す（優先順は LISP_EXTENSIONS）。"""
+        found = self._find_same_stem(stem)
+        return self._pick_preferred(found) if found else None
+
+    def _glob_lisp_files(self) -> list[Path]:
+        """リポジトリ内の LISP ファイルを重複排除せずすべて返す。
+
+        acaddoc.lsp と ag-help.* は管理対象外なので除外する。
+        一括削除のように「実体をすべて」扱いたい場面で使う。
+        """
+        exclude_stems = {"acaddoc", "ag-help"}
+        found: list[Path] = []
+        for ext in self.LISP_EXTENSIONS:
+            for p in self._repo_dir.glob(f"*{ext}"):
+                if p.stem.lower() in exclude_stems:
+                    continue
+                found.append(p)
+        return found
+
     def _list_lsp_files(self) -> list[Path]:
-        """リポジトリ内の .lsp ファイル（acaddoc.lsp, ag-help.lsp を除く）を返す。"""
-        exclude = {"acaddoc.lsp", "ag-help.lsp"}
-        return [
-            p for p in self._repo_dir.glob("*.lsp") if p.name not in exclude
-        ]
+        """リポジトリ内の LISP ファイル（.lsp / .fas / .vlx）を返す。
+
+        acaddoc.lsp と ag-help.* は管理対象外なので除外する。
+        同一 stem で複数形式が存在する場合は LISP_EXTENSIONS の優先順で 1 つに絞る
+        （両方をロード行に出すと二重ロードになるため）。
+        """
+        by_stem: dict[str, list[Path]] = {}
+        for p in self._glob_lisp_files():
+            by_stem.setdefault(p.stem, []).append(p)
+
+        result: list[Path] = []
+        for stem, candidates in by_stem.items():
+            winner = self._pick_preferred(candidates)
+            if len(candidates) > 1:
+                ignored = ", ".join(
+                    sorted(p.name for p in candidates if p != winner)
+                )
+                logger.warning(
+                    "同一 stem に複数形式があります。%s のみロードします（無視: %s）",
+                    winner.name, ignored,
+                )
+            result.append(winner)
+        return sorted(result, key=lambda p: p.name.lower())
 
     def _read_disabled(self) -> set[str]:
         """acaddoc.lsp 内でコメントアウトされている LISP の stem 集合を返す。"""
@@ -311,7 +453,7 @@ class LispManager:
             for line in self._acaddoc_path.read_text(encoding="utf-8", errors="replace").splitlines():
                 m = self._DISABLED_PATTERN.match(line.strip())
                 if m:
-                    disabled.add(m.group(1))
+                    disabled.add(self._to_stem(m.group(1)))
         except OSError as e:
             logger.warning("acaddoc.lsp の読み込みに失敗しました: %s", e)
         return disabled
@@ -330,6 +472,35 @@ class LispManager:
         r' (setq _lm_p nil _lm_tp nil _lm_ps nil) (princ))'
     )
 
+    # ランチャー定義の開始行（update_launcher が生成する形）
+    _LAUNCHER_HEAD: str = "(defun c:lisp_manager"
+
+    def _read_existing_launcher(self) -> str | None:
+        """既存の acaddoc.lsp からランチャー定義のブロックを取り出す。
+
+        update_launcher() を呼ばないまま _write_acaddoc() すると
+        ランチャーが消えてしまうため、その取りこぼしを防ぐ。
+        """
+        if not self._acaddoc_path.exists():
+            return None
+        try:
+            lines = self._acaddoc_path.read_text(
+                encoding="utf-8", errors="replace"
+            ).splitlines()
+        except OSError:
+            return None
+
+        block: list[str] = []
+        for line in lines:
+            if not block and line.startswith(self._LAUNCHER_HEAD):
+                block.append(line)
+                continue
+            if block:
+                block.append(line)
+                if line.strip() == "(princ))":
+                    return "\n".join(block)
+        return None
+
     def _write_acaddoc(self, disabled: set[str]) -> OperationResult:
         """acaddoc.lsp を生成・上書きする（唯一の書き込み口）。
 
@@ -345,12 +516,16 @@ class LispManager:
         for lsp in self._list_lsp_files():
             if lsp.stem == "ag-help":
                 continue  # 上で既にロード済み
-            load_line = f'(load "{lsp.stem}" nil)'
+            target = self._load_target(lsp)
+            load_line = f'(load "{target}" nil)'
             if lsp.stem in disabled:
-                load_line = f';; (load "{lsp.stem}")'
+                load_line = f';; (load "{target}")'
             lines.append(load_line)
-        if self._launcher_lisp:
-            lines.append(self._launcher_lisp)
+        # update_launcher() を通っていない場合でも、既存の acaddoc.lsp に
+        # 書かれているランチャー定義は引き継ぐ（黙って消さない）。
+        launcher = self._launcher_lisp or self._read_existing_launcher()
+        if launcher:
+            lines.append(launcher)
         lines.append(self.END_MARKER)
         content = "\n".join(lines) + "\n"
 
@@ -370,7 +545,14 @@ class LispManager:
         return OperationResult.ok("acaddoc.lsp を更新しました。")
 
     def _extract_commands(self, file_path: Path) -> list[str]:
-        """LISP ファイルから `(defun c:コマンド名` パターンを抽出する。"""
+        """LISP ファイルから `(defun c:コマンド名` パターンを抽出する。
+
+        コンパイル版 (.fas / .vlx) はバイトコードなのでこのパターンが残らない。
+        その場合はサイドカー ({stem}.meta) の @command 行から復元する。
+        サイドカーも無ければ空リストを返す（ロード・実行には影響しない）。
+        """
+        if file_path.suffix.lower() not in self._SOURCE_EXTENSIONS:
+            return self._read_meta_commands(file_path.stem)
         try:
             content = file_path.read_text(encoding="utf-8", errors="replace")
         except OSError as e:
@@ -380,9 +562,28 @@ class LispManager:
         return sorted(set(matches))
 
     def _extract_metadata(self, file_path: Path) -> dict:
-        """LISP ファイルから @button, @description メタデータを抽出する。"""
+        """LISP ファイルから @button, @description メタデータを抽出する。
+
+        @button / @description はコメント行なので、コンパイル版 (.fas / .vlx) には
+        残らない。その場合はサイドカー ({stem}.meta) から読む。
+        README（{stem}_README.md）は別ファイルなのでコンパイル版でもそのまま使える。
+        """
+        if file_path.suffix.lower() not in self._SOURCE_EXTENSIONS:
+            source: Path | None = self._meta_path(file_path.stem)
+            if not source.exists():
+                source = None
+        else:
+            source = file_path
+
+        if source is None:
+            return {
+                "description": "",
+                "button_labels": {},
+                "readme_file": f"{file_path.stem}_README.md",
+            }
+
         try:
-            content = file_path.read_text(encoding="utf-8", errors="replace")
+            content = source.read_text(encoding="utf-8", errors="replace")
         except OSError:
             return {"description": "", "button_labels": {}, "readme_file": ""}
 
@@ -412,6 +613,102 @@ class LispManager:
                 except OSError as e:
                     logger.warning("README のコピーに失敗しました: %s", e)
                 return
+
+    # ------------------------------------------------------------------
+    # メタデータのサイドカー（.meta）
+    # ------------------------------------------------------------------
+
+    def _meta_path(self, stem: str) -> Path:
+        """リポジトリ内のサイドカーのパスを返す。"""
+        return self._repo_dir / f"{stem}{self.META_SUFFIX}"
+
+    def _read_meta_commands(self, stem: str) -> list[str]:
+        """サイドカーの @command 行からコマンド名一覧を返す。
+
+        @command が無い手書きのサイドカーでも拾えるよう、
+        @button 行に書かれたコマンド名もあわせて採用する。
+        """
+        meta = self._meta_path(stem)
+        if not meta.exists():
+            return []
+        try:
+            content = meta.read_text(encoding="utf-8", errors="replace")
+        except OSError as e:
+            logger.warning("メタデータの読み込みに失敗しました (%s): %s", meta.name, e)
+            return []
+
+        commands = set(self._META_COMMAND_PATTERN.findall(content))
+        commands.update(m.group(1) for m in self._BUTTON_PATTERN.finditer(content))
+        return sorted(commands)
+
+    def build_meta_text(self, lsp_path: Path) -> str:
+        """ソース .lsp からサイドカー (.meta) の中身を組み立てて返す。
+
+        コンパイルすると @description / @button のコメントも
+        (defun c:...) のコマンド名も失われるため、テキストで書き出しておく。
+        """
+        commands = self._extract_commands(lsp_path)
+        meta = self._extract_metadata(lsp_path)
+
+        lines = [
+            f";;; {lsp_path.stem}{self.META_SUFFIX}"
+            " - AutoLISP管理ツール用メタデータ",
+            ";;; コンパイル版 (.fas / .vlx) と一緒に配布してください。",
+            f";;; 生成元: {lsp_path.name}",
+            ";;;",
+        ]
+        if meta["description"]:
+            lines.append(f";;; @description {meta['description']}")
+        lines.extend(f";;; @command {c}" for c in commands)
+        lines.extend(
+            f";;; @button {cmd} {label}"
+            for cmd, label in sorted(meta["button_labels"].items())
+        )
+        return "\n".join(lines) + "\n"
+
+    def _prepare_meta(self, src: Path, dest_stem: str) -> str:
+        """コンパイル版のサイドカーを用意する。処理内容を表す一文を返す。
+
+        1. 配布物に {stem}.meta が同梱されていればそれをコピーする
+        2. なければ隣の {stem}.lsp（開発者の手元）から生成する
+        3. どちらも無ければ何もしない（コマンド表示なしで動作はする）
+        """
+        dest_meta = self._meta_path(dest_stem)
+
+        src_meta = src.with_suffix(self.META_SUFFIX)
+        if src_meta.exists():
+            try:
+                shutil.copy2(src_meta, dest_meta)
+                logger.info("メタデータをコピーしました: %s", dest_meta.name)
+                return f"{src_meta.name} を取り込みました。"
+            except OSError as e:
+                logger.warning("メタデータのコピーに失敗しました: %s", e)
+                return f"{src_meta.name} の取り込みに失敗しました: {e}"
+
+        src_lsp = src.with_suffix(".lsp")
+        if src_lsp.exists():
+            try:
+                dest_meta.write_text(
+                    self.build_meta_text(src_lsp), encoding="utf-8"
+                )
+                logger.info(
+                    "メタデータを生成しました: %s ← %s", dest_meta.name, src_lsp.name
+                )
+                return (
+                    f"{src_lsp.name} から {dest_meta.name} を生成しました"
+                    "（配布時はこれも一緒に渡してください）。"
+                )
+            except OSError as e:
+                logger.warning("メタデータの生成に失敗しました: %s", e)
+                return f"{dest_meta.name} の生成に失敗しました: {e}"
+
+        logger.info(
+            "メタデータがないためコマンド名を表示できません: %s", src.name
+        )
+        return (
+            f"{src.stem}{self.META_SUFFIX} が無いため、"
+            "コマンド一覧とツールパレットのボタンは作られません。"
+        )
 
     def _deploy_builtin_files(self) -> None:
         """共通ヘルプシステム（ag-help.lsp, ag-help.dcl）をリポジトリに配置する。"""
